@@ -1,0 +1,500 @@
+<div class="shell">
+  <header class="masthead">
+    <div>
+      <p class="eyebrow">Healthcare AI Platform</p>
+      <h1>Patient Triage Control Center</h1>
+      <p class="subtitle">FastAPI backend + Angular frontend with JWT auth and role-enforced actions.</p>
+    </div>
+    <div class="auth-chip">
+      @if (currentUser) {
+        <span>{{ currentUser.username }} ({{ currentUser.role }})</span>
+        <button class="ghost inline" (click)="logout()">Logout</button>
+      } @else {
+        <span>Not signed in</span>
+      }
+    </div>
+  </header>
+
+  @if (message) {
+    <div class="banner success">{{ message }}</div>
+  }
+  @if (error) {
+    <div class="banner error">{{ error }}</div>
+  }
+
+  @if (!currentUser) {
+    <section class="panel">
+      <h2>Sign In</h2>
+      <p>Default users: <code>admin/admin123</code>, <code>nurse/nurse123</code>, <code>ops/ops123</code>.</p>
+      <div class="grid form-grid">
+        <label>
+          Username
+          <input type="text" [(ngModel)]="loginForm.username" name="login_username" />
+        </label>
+        <label>
+          Password
+          <input type="password" [(ngModel)]="loginForm.password" name="login_password" />
+        </label>
+      </div>
+      <button class="primary" (click)="login()" [disabled]="loading">
+        {{ loading ? 'Signing in...' : 'Sign In' }}
+      </button>
+    </section>
+  } @else {
+    @if (mustChangePassword) {
+      <section class="panel">
+        <h2>Password Update Required</h2>
+        <p>Your account must set a new password before accessing triage modules.</p>
+        <div class="grid form-grid">
+          <label>
+            Current Password
+            <input type="password" [(ngModel)]="passwordForm.current_password" name="current_password" />
+          </label>
+          <label>
+            New Password
+            <input type="password" [(ngModel)]="passwordForm.new_password" name="new_password" />
+          </label>
+          <label>
+            Confirm New Password
+            <input type="password" [(ngModel)]="passwordForm.confirm_password" name="confirm_password" />
+          </label>
+        </div>
+        <button class="primary" (click)="changePassword()" [disabled]="loading">
+          {{ loading ? 'Updating...' : 'Update Password' }}
+        </button>
+      </section>
+    } @else {
+      <nav class="tabs" aria-label="Main Navigation">
+        <button [class.active]="activeTab === 'intake'" (click)="setTab('intake')">Intake</button>
+        @if (canManageQueue()) {
+          <button [class.active]="activeTab === 'queue'" (click)="setTab('queue')">Nurse Queue</button>
+        }
+        <button [class.active]="activeTab === 'dashboard'" (click)="setTab('dashboard')">Dashboard</button>
+        <button [class.active]="activeTab === 'audit'" (click)="setTab('audit')">Audit</button>
+      </nav>
+
+      @if (activeTab === 'intake') {
+        <section class="panel">
+          <h2>Patient Intake</h2>
+          <div class="grid form-grid">
+            <label>
+              Phone
+              <input type="text" [(ngModel)]="intakeForm.phone" name="phone" placeholder="Optional" />
+            </label>
+            <label>
+              Age
+              <input type="number" [(ngModel)]="intakeForm.age" name="age" min="0" max="120" />
+            </label>
+            <label>
+              Sex
+              <select [(ngModel)]="intakeForm.sex" name="sex">
+                <option>Male</option>
+                <option>Female</option>
+                <option>Other</option>
+              </select>
+            </label>
+            <label class="span-3">
+              Symptoms
+              <textarea [(ngModel)]="intakeForm.symptoms" name="symptoms" rows="4" placeholder="Chest pain since morning, breathing feels heavy..."></textarea>
+            </label>
+            <label class="toggle">
+              <input type="checkbox" [(ngModel)]="intakeForm.auto_book_high_urgency" name="auto_book_high_urgency" />
+              Enable auto-book for EMERGENCY/URGENT
+            </label>
+            <label class="toggle span-2">
+              <input type="checkbox" [(ngModel)]="intakeForm.always_route_when_model_requests_human" name="always_route_when_model_requests_human" />
+              Always route to queue when model requests human review
+            </label>
+          </div>
+          <button class="primary" (click)="runIntake()" [disabled]="loading">
+            {{ loading ? 'Running triage...' : 'Run Triage' }}
+          </button>
+
+          @if (intakeResult) {
+            <div class="result-card">
+              <div class="result-head">
+                <h3>Triage Result</h3>
+                <div class="tag-row">
+                  <span class="tone" [ngClass]="urgencyTone(intakeResult.triage_result.urgency)">
+                    {{ intakeResult.triage_result.urgency }}
+                  </span>
+                  <span class="tone neutral">
+                    {{ formatPercent(intakeResult.triage_result.confidence) }} confidence
+                  </span>
+                  <span class="tone" [ngClass]="routingTone(intakeResult.routing_decision.action)">
+                    {{ intakeResult.routing_decision.action }}
+                  </span>
+                </div>
+              </div>
+
+              <div class="result-grid">
+                <article>
+                  <h4>Department</h4>
+                  <p>{{ intakeResult.triage_result.suggested_department }}</p>
+                </article>
+                <article>
+                  <h4>Recommended Window</h4>
+                  <p>{{ intakeResult.triage_result.recommended_timeframe_minutes }} min</p>
+                </article>
+                <article>
+                  <h4>Queue Reference</h4>
+                  <p>{{ intakeResult.queue_id ?? '-' }}</p>
+                </article>
+                <article>
+                  <h4>Appointment</h4>
+                  <p>
+                    @if (intakeResult.appointment_result) {
+                      {{ intakeResult.appointment_result.status }}
+                    } @else {
+                      Pending
+                    }
+                  </p>
+                </article>
+              </div>
+
+              <div class="result-section">
+                <h4>Routing reason</h4>
+                <p>{{ intakeResult.routing_decision.reason }}</p>
+              </div>
+
+              <div class="result-section">
+                <h4>Clinical rationale</h4>
+                <p>{{ intakeResult.triage_result.rationale }}</p>
+              </div>
+
+              @if (intakeResult.triage_result.red_flags.length) {
+                <div class="result-section">
+                  <h4>Red Flags</h4>
+                  <div class="tag-row">
+                    @for (flag of intakeResult.triage_result.red_flags; track trackByIndex($index)) {
+                      <span class="tone critical">{{ flag }}</span>
+                    }
+                  </div>
+                </div>
+              }
+
+              <div class="result-section">
+                <h4>Department Fit</h4>
+                <div class="candidate-list">
+                  @for (candidate of intakeResult.triage_result.department_candidates; track candidate.department) {
+                    <div class="candidate-item">
+                      <div class="candidate-line">
+                        <span>{{ candidate.department }}</span>
+                        <strong>{{ formatPercent(candidate.score) }}</strong>
+                      </div>
+                      <div class="candidate-meter">
+                        <span [style.width.%]="candidate.score <= 1 ? candidate.score * 100 : candidate.score"></span>
+                      </div>
+                    </div>
+                  }
+                </div>
+              </div>
+            </div>
+          }
+        </section>
+      }
+
+      @if (activeTab === 'queue' && canManageQueue()) {
+        <section class="panel">
+          <h2>Nurse Review Queue</h2>
+          <div class="stack">
+            <button class="ghost" (click)="refreshQueue()">Refresh Queue</button>
+            @if (!queueItems.length) {
+              <p>No pending queue items.</p>
+            } @else {
+              <div class="queue-layout">
+                <div class="queue-list">
+                  @for (item of queueItems; track item.id) {
+                    <button class="queue-item" [class.active]="selectedQueueId === item.id" (click)="selectedQueueId = item.id">
+                      <strong>#{{ item.id }}</strong>
+                      <span>{{ item.priority }} | {{ item.suggested_department }}</span>
+                      <small>{{ item.reason }}</small>
+                    </button>
+                  }
+                </div>
+                <div class="queue-detail">
+                  @if (selectedQueue()) {
+                    <p><strong>Symptoms:</strong> {{ selectedQueue()!.symptoms }}</p>
+                    <p><strong>Rationale:</strong> {{ selectedQueue()!.rationale }}</p>
+                    <div class="grid form-grid">
+                      <label>
+                        Nurse Name
+                        <input type="text" [(ngModel)]="queueBookForm.nurse_name" name="nurse_name" />
+                      </label>
+                      <label>
+                        Department Override
+                        <input type="text" [(ngModel)]="queueBookForm.department_override" name="department_override" placeholder="Optional" />
+                      </label>
+                      <label>
+                        Urgency Override
+                        <select [(ngModel)]="queueBookForm.urgency_override" name="urgency_override">
+                          <option value="">Use triage urgency</option>
+                          <option value="EMERGENCY">EMERGENCY</option>
+                          <option value="URGENT">URGENT</option>
+                          <option value="SOON">SOON</option>
+                          <option value="ROUTINE">ROUTINE</option>
+                        </select>
+                      </label>
+                      <label class="span-3">
+                        Note
+                        <textarea [(ngModel)]="queueBookForm.note" name="queue_note" rows="3"></textarea>
+                      </label>
+                    </div>
+                    <button class="primary" (click)="bookQueueItem()" [disabled]="loading">
+                      {{ loading ? 'Saving...' : 'Book / Resolve' }}
+                    </button>
+                  }
+                </div>
+              </div>
+            }
+          </div>
+        </section>
+      }
+
+      @if (activeTab === 'dashboard') {
+        <section class="panel">
+          <h2>Auto-booking Dashboard</h2>
+          <button class="ghost" (click)="refreshDashboard()">Refresh Dashboard</button>
+          @if (metrics) {
+            <div class="metrics">
+              <article>
+                <h3>Total slots</h3>
+                <p>{{ metrics.total_slots }}</p>
+              </article>
+              <article>
+                <h3>Available slots</h3>
+                <p>{{ metrics.available_slots }}</p>
+              </article>
+              <article>
+                <h3>Booked slots</h3>
+                <p>{{ metrics.booked_slots }}</p>
+              </article>
+              <article>
+                <h3>Utilization</h3>
+                <p>{{ metrics.slot_utilization_percent }}%</p>
+              </article>
+              <article>
+                <h3>Total appointments</h3>
+                <p>{{ metrics.total_appointments }}</p>
+              </article>
+              <article>
+                <h3>Auto-booked</h3>
+                <p>{{ metrics.auto_booked_appointments }}</p>
+              </article>
+              <article>
+                <h3>Preempted appointments</h3>
+                <p>{{ metrics.preempted_appointments }}</p>
+              </article>
+              <article>
+                <h3>Triage events (24h)</h3>
+                <p>{{ metrics.triage_events_24h }}</p>
+              </article>
+              <article>
+                <h3>Urgent+Emergency (24h)</h3>
+                <p>{{ metrics.urgent_cases_24h }}</p>
+              </article>
+              <article>
+                <h3>Avg confidence (24h)</h3>
+                <p>{{ formatPercent(metrics.avg_confidence_24h) }}</p>
+              </article>
+              <article>
+                <h3>Repeat patients</h3>
+                <p>{{ metrics.repeat_patients_in_slots }}</p>
+              </article>
+              <article>
+                <h3>Pending queue</h3>
+                <p>{{ metrics.pending_queue }}</p>
+              </article>
+              <article>
+                <h3>Pending urgent queue</h3>
+                <p>{{ metrics.pending_high_priority_queue }}</p>
+              </article>
+            </div>
+          }
+
+          <div class="two-col dashboard-stream">
+            <section class="stream-card">
+              <div class="stream-head">
+                <h3>Recent Appointments</h3>
+                <span class="count-pill">{{ appointmentRows.length }}</span>
+              </div>
+              @if (appointmentRows.length) {
+                <div class="table-wrap">
+                  <table class="data-table compact-table">
+                    <thead>
+                      <tr>
+                        <th>Appt</th>
+                        <th>Booked</th>
+                        <th>Urgency</th>
+                        <th>Department</th>
+                        <th>Provider</th>
+                        <th>Slot Window</th>
+                        <th>Contact</th>
+                        <th>Note</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      @for (row of appointmentRows; track row.appointmentId + row.bookedAt) {
+                        <tr>
+                          <td>#{{ row.appointmentId }}</td>
+                          <td>{{ row.bookedAt }}</td>
+                          <td>
+                            <span class="tone" [ngClass]="urgencyTone(row.urgency)">
+                              {{ row.urgency }}
+                            </span>
+                          </td>
+                          <td>{{ row.department }}</td>
+                          <td>{{ row.provider }}</td>
+                          <td>{{ row.slotWindow }}</td>
+                          <td>{{ row.phone }}</td>
+                          <td class="note-cell">{{ row.note }}</td>
+                        </tr>
+                      }
+                    </tbody>
+                  </table>
+                </div>
+              } @else {
+                <p class="muted">No appointments yet.</p>
+              }
+            </section>
+
+            <section class="stream-card">
+              <div class="stream-head">
+                <h3>Recent Activity</h3>
+                <span class="count-pill">{{ activityRows.length }}</span>
+              </div>
+              @if (activityRows.length) {
+                <div class="activity-stream">
+                  @for (row of activityRows; track row.id + row.createdAt) {
+                    <article class="activity-event">
+                      <div class="activity-top">
+                        <span class="tone" [ngClass]="activityTone(row.activityType)">{{ row.activityType }}</span>
+                        <span class="muted">{{ row.createdAt }}</span>
+                      </div>
+                      <div class="activity-meta">
+                        <span>Event #{{ row.id }}</span>
+                        <span>Appt #{{ row.appointmentId }}</span>
+                        @if (row.slotId !== '-') {
+                          <span>Slot {{ row.slotId }}</span>
+                        }
+                        @if (row.urgency !== '-') {
+                          <span>Urgency {{ row.urgency }}</span>
+                        }
+                      </div>
+                      @if (row.note !== '-') {
+                        <p class="activity-note">{{ row.note }}</p>
+                      }
+                      @if (row.detailsSummary !== '-') {
+                        <p class="activity-detail">{{ row.detailsSummary }}</p>
+                      }
+                    </article>
+                  }
+                </div>
+              } @else {
+                <p class="muted">No activity yet.</p>
+              }
+            </section>
+          </div>
+        </section>
+      }
+
+      @if (activeTab === 'audit') {
+        <section class="panel">
+          <h2>Audit & Alerts</h2>
+          <p>Server-enforced role scope: <strong>{{ audit?.role || currentUser.role }}</strong></p>
+          <div class="grid form-grid">
+            <label>
+              Rows
+              <input type="number" [(ngModel)]="auditRows" name="audit_rows" min="10" max="300" />
+            </label>
+          </div>
+          <button class="primary" (click)="refreshAudit()">Load Audit Data</button>
+
+          @if (audit) {
+            <div class="audit-grid">
+              <section class="audit-card">
+                <h3>Triage Decisions</h3>
+                @if (auditTriageRows.length) {
+                  <div class="table-wrap">
+                    <table class="data-table">
+                      <thead>
+                        <tr>
+                          <th>Event</th>
+                          <th>Time</th>
+                          <th>Urgency</th>
+                          <th>Confidence</th>
+                          <th>Department</th>
+                          <th>Routing</th>
+                          <th>Reason</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        @for (row of auditTriageRows; track trackByIndex($index)) {
+                          <tr>
+                            <td>#{{ row.triageEventId }}</td>
+                            <td>{{ row.createdAt }}</td>
+                            <td>
+                              <span class="tone" [ngClass]="urgencyTone(row.urgency)">
+                                {{ row.urgency }}
+                              </span>
+                            </td>
+                            <td>{{ row.confidenceLabel }}</td>
+                            <td>{{ row.suggestedDepartment }}</td>
+                            <td>
+                              <span class="tone" [ngClass]="routingTone(row.routingAction)">
+                                {{ row.routingAction }}
+                              </span>
+                            </td>
+                            <td>{{ row.routingReason }}</td>
+                          </tr>
+                        }
+                      </tbody>
+                    </table>
+                  </div>
+                } @else {
+                  <p class="muted">No triage decisions found for current role scope.</p>
+                }
+              </section>
+
+              <section class="audit-card">
+                <h3>Audit Log</h3>
+                @if (auditLogRows.length) {
+                  <div class="table-wrap">
+                    <table class="data-table">
+                      <thead>
+                        <tr>
+                          <th>ID</th>
+                          <th>Type</th>
+                          <th>Entity</th>
+                          <th>Action</th>
+                          <th>Time</th>
+                          <th>Payload Summary</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        @for (row of auditLogRows; track trackByIndex($index)) {
+                          <tr>
+                            <td>#{{ row.id }}</td>
+                            <td>{{ row.entityType }}</td>
+                            <td>{{ row.entityId }}</td>
+                            <td>
+                              <span class="tone neutral">{{ row.action }}</span>
+                            </td>
+                            <td>{{ row.createdAt }}</td>
+                            <td>{{ row.payloadSummary }}</td>
+                          </tr>
+                        }
+                      </tbody>
+                    </table>
+                  </div>
+                } @else {
+                  <p class="muted">No audit events found for current role scope.</p>
+                }
+              </section>
+            </div>
+          }
+        </section>
+      }
+    }
+  }
+</div>

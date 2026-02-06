@@ -1,0 +1,26 @@
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=Fraunces:opsz,wght@9..144,600;9..144,700&display=swap');
+
+:root {
+  color-scheme: light;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+}
+
+body {
+  font-family: 'Outfit', 'Segoe UI Variable', 'Trebuchet MS', sans-serif;
+  background:
+    radial-gradient(circle at 5% 10%, rgba(64, 180, 120, 0.16), transparent 35%),
+    radial-gradient(circle at 95% 0%, rgba(22, 135, 142, 0.2), transparent 30%),
+    linear-gradient(180deg, #f0f8f6 0%, #f6fbf9 40%, #f4f8fb 100%);
+  color: #163e34;
+}
+
+h1,
+h2,
+h3 {
+  font-family: 'Fraunces', 'Georgia', serif;
+}
