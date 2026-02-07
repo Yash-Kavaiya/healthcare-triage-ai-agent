@@ -24,6 +24,7 @@ class AuthUser:
     role: str
     full_name: str | None = None
     password_change_required: bool = False
+    onboarding_completed: bool = False
 
 
 @dataclass(frozen=True)
@@ -33,6 +34,7 @@ class _SeedUser:
     role: str
     full_name: str | None = None
     password_change_required: bool = False
+    onboarding_completed: bool = False
 
 
 class AuthManager:
@@ -177,6 +179,7 @@ class AuthManager:
             "role": user.role,
             "full_name": user.full_name,
             "pwd_reset_required": bool(user.password_change_required),
+            "onboarding_completed": bool(user.onboarding_completed),
             "iat": int(now.timestamp()),
             "exp": int((now + timedelta(minutes=self.access_token_exp_minutes)).timestamp()),
         }
@@ -199,6 +202,7 @@ class AuthManager:
             "role": user.role,
             "full_name": user.full_name,
             "pwd_reset_required": bool(user.password_change_required),
+            "onboarding_completed": bool(user.onboarding_completed),
             "jti": jti,
             "fid": family,
             "iat": int(now.timestamp()),
@@ -334,7 +338,7 @@ class AuthManager:
 
             user_row = conn.execute(
                 """
-                SELECT username, role, full_name, password_change_required
+                SELECT username, role, full_name, password_change_required, onboarding_completed
                 FROM auth_users
                 WHERE username = ?;
                 """,
@@ -456,6 +460,222 @@ class AuthManager:
             )
         return self.get_user(username)
 
+    def complete_onboarding(self, *, username: str) -> AuthUser:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE auth_users
+                SET onboarding_completed = 1, updated_at = datetime('now')
+                WHERE username = ?;
+                """,
+                (username,),
+            )
+        return self.get_user(username)
+
+    def reset_onboarding(self, *, username: str) -> AuthUser:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT username
+                FROM auth_users
+                WHERE username = ?;
+                """,
+                (username,),
+            ).fetchone()
+            if not row:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="User not found.",
+                )
+            conn.execute(
+                """
+                UPDATE auth_users
+                SET onboarding_completed = 0, updated_at = datetime('now')
+                WHERE username = ?;
+                """,
+                (username,),
+            )
+        return self.get_user(username)
+
+    def list_users(self) -> list[AuthUser]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT username, role, full_name, password_change_required, onboarding_completed
+                FROM auth_users
+                ORDER BY role, username;
+                """
+            ).fetchall()
+        return [self._row_to_user(row) for row in rows]
+
+    def create_user(
+        self,
+        *,
+        username: str,
+        password: str,
+        role: str,
+        full_name: str | None = None,
+    ) -> AuthUser:
+        if role.lower() not in {"admin", "nurse", "operations"}:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid role. Must be admin, nurse, or operations.",
+            )
+        if len(password) < 8:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Password must be at least 8 characters.",
+            )
+        password_hash = hash_password(password)
+        with self._connect() as conn:
+            try:
+                conn.execute(
+                    """
+                    INSERT INTO auth_users (
+                        username,
+                        password_hash,
+                        role,
+                        full_name,
+                        password_change_required,
+                        onboarding_completed,
+                        is_default
+                    )
+                    VALUES (?, ?, ?, ?, 1, 0, 0);
+                    """,
+                    (username, password_hash, role.lower(), full_name),
+                )
+            except sqlite3.IntegrityError as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Username already exists.",
+                ) from exc
+        return self.get_user(username)
+
+    def update_user(
+        self,
+        *,
+        username: str,
+        role: str | None = None,
+        full_name: str | None = None,
+    ) -> AuthUser:
+        if role and role.lower() not in {"admin", "nurse", "operations"}:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid role. Must be admin, nurse, or operations.",
+            )
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT username
+                FROM auth_users
+                WHERE username = ?;
+                """,
+                (username,),
+            ).fetchone()
+            if not row:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="User not found.",
+                )
+            if role:
+                conn.execute(
+                    """
+                    UPDATE auth_users
+                    SET role = ?, updated_at = datetime('now')
+                    WHERE username = ?;
+                    """,
+                    (role.lower(), username),
+                )
+            if full_name is not None:
+                conn.execute(
+                    """
+                    UPDATE auth_users
+                    SET full_name = ?, updated_at = datetime('now')
+                    WHERE username = ?;
+                    """,
+                    (full_name, username),
+                )
+        return self.get_user(username)
+
+    def admin_reset_password(
+        self,
+        *,
+        username: str,
+        new_password: str,
+    ) -> AuthUser:
+        if len(new_password) < 8:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Password must be at least 8 characters.",
+            )
+        new_hash = hash_password(new_password)
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT username
+                FROM auth_users
+                WHERE username = ?;
+                """,
+                (username,),
+            ).fetchone()
+            if not row:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="User not found.",
+                )
+            conn.execute(
+                """
+                UPDATE auth_users
+                SET password_hash = ?, password_change_required = 1, updated_at = datetime('now')
+                WHERE username = ?;
+                """,
+                (new_hash, username),
+            )
+            conn.execute(
+                """
+                UPDATE auth_refresh_sessions
+                SET revoked = 1, revoked_at = datetime('now')
+                WHERE username = ?;
+                """,
+                (username,),
+            )
+        return self.get_user(username)
+
+    def delete_user(self, *, username: str) -> None:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT username, is_default
+                FROM auth_users
+                WHERE username = ?;
+                """,
+                (username,),
+            ).fetchone()
+            if not row:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="User not found.",
+                )
+            if int(row["is_default"]) == 1:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Cannot delete default system users.",
+                )
+            conn.execute(
+                """
+                DELETE FROM auth_refresh_sessions
+                WHERE username = ?;
+                """,
+                (username,),
+            )
+            conn.execute(
+                """
+                DELETE FROM auth_users
+                WHERE username = ?;
+                """,
+                (username,),
+            )
+
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path, timeout=30)
         conn.row_factory = sqlite3.Row
@@ -470,6 +690,7 @@ class AuthManager:
             role TEXT NOT NULL,
             full_name TEXT,
             password_change_required INTEGER NOT NULL DEFAULT 0,
+            onboarding_completed INTEGER NOT NULL DEFAULT 0,
             is_default INTEGER NOT NULL DEFAULT 0,
             created_at TEXT NOT NULL DEFAULT (datetime('now')),
             updated_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -507,6 +728,11 @@ class AuthManager:
         """
         with self._connect() as conn:
             conn.executescript(schema)
+            self._ensure_auth_users_column(
+                conn,
+                column_name="onboarding_completed",
+                column_sql="INTEGER NOT NULL DEFAULT 0",
+            )
             for seed in seed_users:
                 conn.execute(
                     """
@@ -516,9 +742,10 @@ class AuthManager:
                         role,
                         full_name,
                         password_change_required,
+                        onboarding_completed,
                         is_default
                     )
-                    VALUES (?, ?, ?, ?, ?, ?);
+                    VALUES (?, ?, ?, ?, ?, ?, ?);
                     """,
                     (
                         seed.username,
@@ -526,6 +753,7 @@ class AuthManager:
                         seed.role,
                         seed.full_name,
                         int(seed.password_change_required),
+                        int(seed.onboarding_completed),
                         1,
                     ),
                 )
@@ -539,7 +767,8 @@ class AuthManager:
                     password_hash,
                     role,
                     full_name,
-                    password_change_required
+                    password_change_required,
+                    onboarding_completed
                 FROM auth_users
                 WHERE username = ?;
                 """,
@@ -601,7 +830,21 @@ class AuthManager:
             role=row["role"],
             full_name=row["full_name"],
             password_change_required=bool(row["password_change_required"]),
+            onboarding_completed=bool(row["onboarding_completed"]),
         )
+
+    @staticmethod
+    def _ensure_auth_users_column(
+        conn: sqlite3.Connection,
+        *,
+        column_name: str,
+        column_sql: str,
+    ) -> None:
+        existing = conn.execute("PRAGMA table_info(auth_users);").fetchall()
+        names = {row["name"] for row in existing}
+        if column_name in names:
+            return
+        conn.execute(f"ALTER TABLE auth_users ADD COLUMN {column_name} {column_sql};")
 
     def _decode_token(self, token: str, *, verify_exp: bool = True) -> dict[str, Any]:
         try:
@@ -684,6 +927,7 @@ def _load_seed_users(*, force_change_defaults: bool) -> list[_SeedUser]:
         role = str(item.get("role", "")).strip().lower()
         full_name = str(item.get("full_name", "")).strip() or None
         password_change_required = bool(item.get("password_change_required", False))
+        onboarding_completed = bool(item.get("onboarding_completed", False))
         if not username or not password or role not in {"admin", "nurse", "operations"}:
             continue
         users.append(
@@ -693,6 +937,7 @@ def _load_seed_users(*, force_change_defaults: bool) -> list[_SeedUser]:
                 role=role,
                 full_name=full_name,
                 password_change_required=password_change_required,
+                onboarding_completed=onboarding_completed,
             )
         )
     return users or _default_seed_users(force_change_defaults=force_change_defaults)
@@ -757,6 +1002,11 @@ def require_roles(*roles: str):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Password change is required before accessing this resource.",
+            )
+        if not user.onboarding_completed:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Onboarding is required before accessing this resource.",
             )
         if user.role.lower() not in allowed:
             raise HTTPException(

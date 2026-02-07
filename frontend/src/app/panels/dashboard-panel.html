@@ -1,0 +1,144 @@
+<section class="panel">
+  <h2>Auto-booking Dashboard</h2>
+  <button class="ghost" (click)="refresh.emit()">Refresh Dashboard</button>
+  @if (metrics) {
+    <div class="metrics">
+      <article>
+        <h3>Total slots</h3>
+        <p>{{ metrics.total_slots }}</p>
+      </article>
+      <article>
+        <h3>Available slots</h3>
+        <p>{{ metrics.available_slots }}</p>
+      </article>
+      <article>
+        <h3>Booked slots</h3>
+        <p>{{ metrics.booked_slots }}</p>
+      </article>
+      <article>
+        <h3>Utilization</h3>
+        <p>{{ metrics.slot_utilization_percent }}%</p>
+      </article>
+      <article>
+        <h3>Total appointments</h3>
+        <p>{{ metrics.total_appointments }}</p>
+      </article>
+      <article>
+        <h3>Auto-booked</h3>
+        <p>{{ metrics.auto_booked_appointments }}</p>
+      </article>
+      <article>
+        <h3>Preempted appointments</h3>
+        <p>{{ metrics.preempted_appointments }}</p>
+      </article>
+      <article>
+        <h3>Triage events (24h)</h3>
+        <p>{{ metrics.triage_events_24h }}</p>
+      </article>
+      <article>
+        <h3>Urgent+Emergency (24h)</h3>
+        <p>{{ metrics.urgent_cases_24h }}</p>
+      </article>
+      <article>
+        <h3>Avg confidence (24h)</h3>
+        <p>{{ formatPercent(metrics.avg_confidence_24h) }}</p>
+      </article>
+      <article>
+        <h3>Repeat patients</h3>
+        <p>{{ metrics.repeat_patients_in_slots }}</p>
+      </article>
+      <article>
+        <h3>Pending queue</h3>
+        <p>{{ metrics.pending_queue }}</p>
+      </article>
+      <article>
+        <h3>Pending urgent queue</h3>
+        <p>{{ metrics.pending_high_priority_queue }}</p>
+      </article>
+    </div>
+  }
+
+  <div class="two-col dashboard-stream">
+    <section class="stream-card">
+      <div class="stream-head">
+        <h3>Recent Appointments</h3>
+        <span class="count-pill">{{ appointmentRows.length }}</span>
+      </div>
+      @if (appointmentRows.length) {
+        <div class="table-wrap">
+          <table class="data-table compact-table">
+            <thead>
+              <tr>
+                <th>Appt</th>
+                <th>Booked</th>
+                <th>Urgency</th>
+                <th>Department</th>
+                <th>Provider</th>
+                <th>Slot Window</th>
+                <th>Contact</th>
+                <th>Note</th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (row of appointmentRows; track row.appointmentId + row.bookedAt) {
+                <tr>
+                  <td>#{{ row.appointmentId }}</td>
+                  <td>{{ row.bookedAt }}</td>
+                  <td>
+                    <span class="tone" [ngClass]="urgencyTone(row.urgency)">
+                      {{ row.urgency }}
+                    </span>
+                  </td>
+                  <td>{{ row.department }}</td>
+                  <td>{{ row.provider }}</td>
+                  <td>{{ row.slotWindow }}</td>
+                  <td>{{ row.phone }}</td>
+                  <td class="note-cell">{{ row.note }}</td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        </div>
+      } @else {
+        <p class="muted">No appointments yet.</p>
+      }
+    </section>
+
+    <section class="stream-card">
+      <div class="stream-head">
+        <h3>Recent Activity</h3>
+        <span class="count-pill">{{ activityRows.length }}</span>
+      </div>
+      @if (activityRows.length) {
+        <div class="activity-stream">
+          @for (row of activityRows; track row.id + row.createdAt) {
+            <article class="activity-event">
+              <div class="activity-top">
+                <span class="tone" [ngClass]="activityTone(row.activityType)">{{ row.activityType }}</span>
+                <span class="muted">{{ row.createdAt }}</span>
+              </div>
+              <div class="activity-meta">
+                <span>Event #{{ row.id }}</span>
+                <span>Appt #{{ row.appointmentId }}</span>
+                @if (row.slotId !== '-') {
+                  <span>Slot {{ row.slotId }}</span>
+                }
+                @if (row.urgency !== '-') {
+                  <span>Urgency {{ row.urgency }}</span>
+                }
+              </div>
+              @if (row.note !== '-') {
+                <p class="activity-note">{{ row.note }}</p>
+              }
+              @if (row.detailsSummary !== '-') {
+                <p class="activity-detail">{{ row.detailsSummary }}</p>
+              }
+            </article>
+          }
+        </div>
+      } @else {
+        <p class="muted">No activity yet.</p>
+      }
+    </section>
+  </div>
+</section>

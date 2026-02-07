@@ -24,6 +24,7 @@ class AuthUserResponse(BaseModel):
     role: Role
     full_name: str | None = None
     password_change_required: bool = False
+    onboarding_completed: bool = False
 
 
 class AuthTokenResponse(BaseModel):
@@ -41,6 +42,31 @@ class AuthRefreshRequest(BaseModel):
 
 class AuthChangePasswordRequest(BaseModel):
     current_password: str = Field(min_length=1, max_length=200)
+    new_password: str = Field(min_length=8, max_length=200)
+
+
+class AuthResetOnboardingRequest(BaseModel):
+    username: str = Field(min_length=1, max_length=100)
+
+
+class UserListResponse(BaseModel):
+    users: list[AuthUserResponse]
+
+
+class UserCreateRequest(BaseModel):
+    username: str = Field(min_length=1, max_length=100)
+    password: str = Field(min_length=8, max_length=200)
+    role: Role
+    full_name: str | None = Field(default=None, max_length=200)
+
+
+class UserUpdateRequest(BaseModel):
+    full_name: str | None = Field(default=None, max_length=200)
+    role: Role | None = None
+
+
+class AdminResetPasswordRequest(BaseModel):
+    username: str = Field(min_length=1, max_length=100)
     new_password: str = Field(min_length=8, max_length=200)
 
 

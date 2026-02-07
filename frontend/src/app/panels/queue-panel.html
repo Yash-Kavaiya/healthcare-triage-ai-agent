@@ -1,0 +1,54 @@
+<section class="panel">
+  <h2>Nurse Review Queue</h2>
+  <div class="stack">
+    <button class="ghost" (click)="refresh.emit()">Refresh Queue</button>
+    @if (!items.length) {
+      <p>No pending queue items.</p>
+    } @else {
+      <div class="queue-layout">
+        <div class="queue-list">
+          @for (item of items; track item.id) {
+            <button class="queue-item" [class.active]="selectedQueueId === item.id" (click)="onSelectQueue(item.id)">
+              <strong>#{{ item.id }}</strong>
+              <span>{{ item.priority }} | {{ item.suggested_department }}</span>
+              <small>{{ item.reason }}</small>
+            </button>
+          }
+        </div>
+        <div class="queue-detail">
+          @if (selectedQueue()) {
+            <p><strong>Symptoms:</strong> {{ selectedQueue()!.symptoms }}</p>
+            <p><strong>Rationale:</strong> {{ selectedQueue()!.rationale }}</p>
+            <div class="grid form-grid">
+              <label>
+                Nurse Name
+                <input type="text" [(ngModel)]="bookForm.nurse_name" name="nurse_name" />
+              </label>
+              <label>
+                Department Override
+                <input type="text" [(ngModel)]="bookForm.department_override" name="department_override" placeholder="Optional" />
+              </label>
+              <label>
+                Urgency Override
+                <select [(ngModel)]="bookForm.urgency_override" name="urgency_override">
+                  <option value="">Use triage urgency</option>
+                  <option value="EMERGENCY">EMERGENCY</option>
+                  <option value="URGENT">URGENT</option>
+                  <option value="SOON">SOON</option>
+                  <option value="ROUTINE">ROUTINE</option>
+                </select>
+              </label>
+              <label class="span-3">
+                Note
+                <textarea [(ngModel)]="bookForm.note" name="queue_note" rows="3"></textarea>
+              </label>
+            </div>
+            <button class="primary" (click)="book.emit()" [disabled]="loading">
+              {{ loading ? 'Saving...' : 'Book / Resolve' }}
+            </button>
+          }
+        </div>
+      </div>
+    }
+  </div>
+</section>

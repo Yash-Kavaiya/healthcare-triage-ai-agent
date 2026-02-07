@@ -1,7 +1,10 @@
+// Healthcare Triage AI Agent - Main App Component
 import { CommonModule } from '@angular/common';
 import { Component, OnInit } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { HttpErrorResponse } from '@angular/common/http';
+import { NavigationEnd, Router, RouterOutlet } from '@angular/router';
+import { filter } from 'rxjs';
 
 import { ApiService } from './api.service.js';
 import {
@@ -16,8 +19,13 @@ import {
   QueueItem,
   QueueListResponse,
 } from './api.types.js';
+import { AuditPanel } from './panels/audit-panel.js';
+import { DashboardPanel } from './panels/dashboard-panel.js';
+import { IntakePanel } from './panels/intake-panel.js';
+import { QueuePanel } from './panels/queue-panel.js';
 
 type TabKey = 'intake' | 'queue' | 'dashboard' | 'audit';
+type BoardKey = 'nurse' | 'operations' | 'admin';
 type UrgencyTone = 'critical' | 'high' | 'medium' | 'low' | 'neutral';
 
 interface AuditTriageRow {
@@ -64,11 +72,20 @@ interface ActivityViewRow {
 
 @Component({
   selector: 'app-root',
-  imports: [CommonModule, FormsModule],
+  imports: [
+    CommonModule,
+    FormsModule,
+    RouterOutlet,
+    IntakePanel,
+    QueuePanel,
+    DashboardPanel,
+    AuditPanel,
+  ],
   templateUrl: './app.html',
   styleUrl: './app.css',
 })
 export class App implements OnInit {
+  activeBoard: BoardKey = 'operations';
   activeTab: TabKey = 'intake';
   loading = false;
   message = '';
@@ -116,9 +133,19 @@ export class App implements OnInit {
   auditTriageRows: AuditTriageRow[] = [];
   auditLogRows: AuditLogRow[] = [];
 
-  constructor(private readonly api: ApiService) {}
+  constructor(
+    private readonly api: ApiService,
+    private readonly router: Router,
+  ) {}
 
   ngOnInit(): void {
+    this.syncBoardFromUrl(this.router.url);
+    this.router.events
+      .pipe(filter((event) => event instanceof NavigationEnd))
+      .subscribe((event) =>
+        this.syncBoardFromUrl((event as NavigationEnd).urlAfterRedirects),
+      );
+
     if (this.api.hasSession()) {
       this.restoreSession();
     }
@@ -133,11 +160,32 @@ export class App implements OnInit {
       this.error = 'Change your password before accessing protected modules.';
       return;
     }
-    if (tab === 'queue' && !this.canManageQueue()) {
-      this.error = 'Queue management requires nurse or admin role.';
+    if (!this.isTabVisible(tab)) {
+      this.error = 'This tab is not available for the selected board.';
       return;
     }
     this.activeTab = tab;
+    this.clearStatus();
+  }
+
+  setBoard(board: BoardKey): void {
+    if (!this.currentUser) {
+      this.error = 'Log in first.';
+      return;
+    }
+    if (this.mustChangePassword) {
+      this.error = 'Change your password before accessing protected modules.';
+      return;
+    }
+    if (!this.canAccessBoard(board)) {
+      this.error = 'You do not have access to this board.';
+      return;
+    }
+    this.activeBoard = board;
+    this.navigateToBoard(board);
+    if (!this.isTabVisible(this.activeTab)) {
+      this.activeTab = this.defaultTabForBoard(this.activeBoard);
+    }
     this.clearStatus();
   }
 
@@ -148,10 +196,17 @@ export class App implements OnInit {
       next: (result: AuthTokenResponse) => {
         this.currentUser = result.user;
         this.mustChangePassword = !!result.user.password_change_required;
+        this.activeBoard = this.defaultBoardForUser(result.user.role);
+        this.activeTab = this.defaultTabForBoard(this.activeBoard);
         if (this.mustChangePassword) {
           this.message = 'Password change required before continuing.';
           this.passwordForm.current_password = this.loginForm.password;
+          this.navigateToBoard(this.activeBoard, true);
+        } else if (this.requiresOnboarding(result.user)) {
+          this.navigateToOnboarding(result.user.role, true);
+          this.message = `Welcome ${result.user.username}. Complete onboarding to unlock ${result.user.role} workflows.`;
         } else {
+          this.navigateToBoard(this.activeBoard, true);
           this.message = `Logged in as ${result.user.username} (${result.user.role}).`;
           this.bootstrapData();
         }
@@ -188,13 +243,23 @@ export class App implements OnInit {
         next: (tokenResponse: AuthTokenResponse) => {
           this.currentUser = tokenResponse.user;
           this.mustChangePassword = !!tokenResponse.user.password_change_required;
+          this.activeBoard = this.defaultBoardForUser(tokenResponse.user.role);
+          this.activeTab = this.defaultTabForBoard(this.activeBoard);
           this.passwordForm = {
             current_password: '',
             new_password: '',
             confirm_password: '',
           };
-          this.message = 'Password updated. Access granted.';
-          this.bootstrapData();
+          if (this.mustChangePassword) {
+            this.message = 'Password change required before continuing.';
+            this.navigateToBoard(this.activeBoard, true);
+          } else if (this.requiresOnboarding(tokenResponse.user)) {
+            this.navigateToOnboarding(tokenResponse.user.role, true);
+            this.message = 'Password updated. Complete onboarding to continue.';
+          } else {
+            this.message = 'Password updated. Access granted.';
+            this.bootstrapData();
+          }
           this.loading = false;
         },
         error: (err: unknown) => {
@@ -223,7 +288,9 @@ export class App implements OnInit {
     this.audit = null;
     this.auditTriageRows = [];
     this.auditLogRows = [];
+    this.activeBoard = 'operations';
     this.activeTab = 'intake';
+    this.navigateToBoard(this.activeBoard, true);
     this.message = 'Logged out.';
     this.error = '';
   }
@@ -386,6 +453,128 @@ export class App implements OnInit {
     return this.currentUser?.role === 'nurse' || this.currentUser?.role === 'admin';
   }
 
+  availableBoards(): BoardKey[] {
+    if (!this.currentUser) {
+      return [];
+    }
+    if (this.currentUser.role === 'admin') {
+      return ['admin', 'nurse', 'operations'];
+    }
+    if (this.currentUser.role === 'nurse') {
+      return ['nurse'];
+    }
+    return ['operations'];
+  }
+
+  boardLabel(board: BoardKey): string {
+    if (board === 'admin') {
+      return 'Admin Board';
+    }
+    if (board === 'nurse') {
+      return 'Nurse Board';
+    }
+    return 'Ops Board';
+  }
+
+  pageTitle(): string {
+    if (!this.currentUser) {
+      return 'Patient Triage Control Center';
+    }
+    if (this.isOnboardingRoute()) {
+      return 'Role Onboarding';
+    }
+    if (this.activeBoard === 'admin') {
+      return 'Admin Governance Workspace';
+    }
+    if (this.activeBoard === 'nurse') {
+      return 'Nurse Triage Workspace';
+    }
+    return 'Operations Control Workspace';
+  }
+
+  pageSubtitle(): string {
+    if (!this.currentUser) {
+      return 'FastAPI backend + Angular frontend with JWT auth and role-enforced actions.';
+    }
+    if (this.isOnboardingRoute()) {
+      return 'Complete setup checklist before accessing protected triage modules.';
+    }
+    if (this.activeBoard === 'admin') {
+      return 'Policy oversight, routing safety, and cross-role supervision.';
+    }
+    if (this.activeBoard === 'nurse') {
+      return 'Queue-first triage resolution with rapid booking and escalation.';
+    }
+    return 'Intake throughput, utilization tracking, and workflow monitoring.';
+  }
+
+  openBoardTab(tab: TabKey): void {
+    this.setTab(tab);
+  }
+
+  isOnboardingRoute(): boolean {
+    return this.onboardingRoleFromUrl(this.router.url) !== null;
+  }
+
+  completeOnboarding(role: BoardKey): void {
+    if (!this.currentUser) {
+      this.error = 'Log in first.';
+      return;
+    }
+    const userBoard = this.defaultBoardForUser(this.currentUser.role);
+    if (role !== userBoard) {
+      this.error = 'Role mismatch for onboarding completion.';
+      return;
+    }
+    this.loading = true;
+    this.clearStatus();
+    this.api.completeOnboarding().subscribe({
+      next: (updatedUser: AuthUser) => {
+        this.currentUser = updatedUser;
+        this.activeBoard = userBoard;
+        this.activeTab = this.defaultTabForBoard(this.activeBoard);
+        this.message = `${this.boardLabel(userBoard)} onboarding completed.`;
+        this.navigateToBoard(this.activeBoard, true);
+        this.bootstrapData();
+        this.loading = false;
+      },
+      error: (err: unknown) => {
+        this.error = this.extractError(err, 'Unable to complete onboarding.');
+        this.loading = false;
+      },
+    });
+  }
+
+  refreshBoardSummary(): void {
+    this.refreshDashboard();
+    if (this.activeBoard === 'nurse' || this.activeBoard === 'admin') {
+      this.refreshQueue();
+    }
+    this.refreshAudit();
+  }
+
+  navigateToUserManagement(): void {
+    void this.router.navigate(['/admin/users']);
+  }
+
+  metricNumber(value: number | null | undefined): string {
+    if (value === null || value === undefined) {
+      return '-';
+    }
+    return String(value);
+  }
+
+  metricPercent(value: number | null | undefined): string {
+    if (value === null || value === undefined) {
+      return '-';
+    }
+    return this.formatPercent(value);
+  }
+
+  isTabVisible(tab: TabKey): boolean {
+    return this.visibleTabs().includes(tab);
+  }
+
   asJson(value: unknown): string {
     return JSON.stringify(value, null, 2);
   }
@@ -457,9 +646,16 @@ export class App implements OnInit {
       next: (user: AuthUser) => {
         this.currentUser = user;
         this.mustChangePassword = !!user.password_change_required;
+        this.activeBoard = this.defaultBoardForUser(user.role);
+        this.activeTab = this.defaultTabForBoard(this.activeBoard);
         if (this.mustChangePassword) {
+          this.navigateToBoard(this.activeBoard, true);
           this.message = 'Password change required before continuing.';
+        } else if (this.requiresOnboarding(user)) {
+          this.navigateToOnboarding(user.role, true);
+          this.message = 'Complete onboarding to unlock your role workspace.';
         } else {
+          this.navigateToBoard(this.activeBoard, true);
           this.bootstrapData();
         }
       },
@@ -475,12 +671,170 @@ export class App implements OnInit {
     if (this.mustChangePassword) {
       return;
     }
+    if (this.currentUser && this.requiresOnboarding(this.currentUser)) {
+      this.navigateToOnboarding(this.currentUser.role, true);
+      return;
+    }
+    if (!this.canAccessBoard(this.activeBoard)) {
+      this.activeBoard = this.defaultBoardForUser(this.currentUser?.role);
+    }
+    if (!this.isTabVisible(this.activeTab)) {
+      this.activeTab = this.defaultTabForBoard(this.activeBoard);
+    }
+    this.navigateToBoard(this.activeBoard, true);
     this.refreshDashboard();
     this.refreshAudit();
     this.refreshQueue();
-    if (!this.canManageQueue() && this.activeTab === 'queue') {
-      this.activeTab = 'intake';
+  }
+
+  private canAccessBoard(board: BoardKey): boolean {
+    if (!this.currentUser) {
+      return false;
     }
+    if (this.currentUser.role === 'admin') {
+      return true;
+    }
+    if (this.currentUser.role === 'nurse') {
+      return board === 'nurse';
+    }
+    return board === 'operations';
+  }
+
+  private visibleTabs(): TabKey[] {
+    if (this.activeBoard === 'admin') {
+      return ['intake', 'queue', 'dashboard', 'audit'];
+    }
+    if (this.activeBoard === 'nurse') {
+      return ['queue', 'intake', 'dashboard', 'audit'];
+    }
+    return ['intake', 'dashboard', 'audit'];
+  }
+
+  private defaultBoardForUser(role: AuthUser['role'] | undefined): BoardKey {
+    if (role === 'admin') {
+      return 'admin';
+    }
+    if (role === 'nurse') {
+      return 'nurse';
+    }
+    return 'operations';
+  }
+
+  private defaultTabForBoard(board: BoardKey): TabKey {
+    if (board === 'nurse') {
+      return 'queue';
+    }
+    if (board === 'admin') {
+      return 'dashboard';
+    }
+    return 'intake';
+  }
+
+  private syncBoardFromUrl(url: string): void {
+    const onboardingRole = this.onboardingRoleFromUrl(url);
+    if (onboardingRole) {
+      this.activeBoard = onboardingRole;
+      if (!this.isTabVisible(this.activeTab)) {
+        this.activeTab = this.defaultTabForBoard(onboardingRole);
+      }
+      return;
+    }
+
+    const board = this.boardFromUrl(url);
+    if (!board) {
+      return;
+    }
+    if (!this.currentUser) {
+      this.activeBoard = board;
+      if (!this.isTabVisible(this.activeTab)) {
+        this.activeTab = this.defaultTabForBoard(board);
+      }
+      return;
+    }
+    if (this.canAccessBoard(board)) {
+      this.activeBoard = board;
+    } else {
+      this.activeBoard = this.defaultBoardForUser(this.currentUser.role);
+    }
+    if (!this.isTabVisible(this.activeTab)) {
+      this.activeTab = this.defaultTabForBoard(this.activeBoard);
+    }
+    if (this.currentUser && !this.mustChangePassword && this.requiresOnboarding(this.currentUser)) {
+      this.navigateToOnboarding(this.currentUser.role, true);
+    }
+  }
+
+  private boardFromUrl(url: string): BoardKey | null {
+    const cleanPath = url.split('?')[0].split('#')[0];
+    const segment = cleanPath.replace(/^\//, '').split('/')[0];
+    if (segment === 'nurse') {
+      return 'nurse';
+    }
+    if (segment === 'admin') {
+      return 'admin';
+    }
+    if (segment === 'ops') {
+      return 'operations';
+    }
+    return null;
+  }
+
+  private boardPath(board: BoardKey): string {
+    if (board === 'nurse') {
+      return 'nurse';
+    }
+    if (board === 'admin') {
+      return 'admin';
+    }
+    return 'ops';
+  }
+
+  private navigateToBoard(board: BoardKey, replaceUrl = false): void {
+    const target = `/${this.boardPath(board)}`;
+    const current = this.router.url.split('?')[0].split('#')[0];
+    if (current === target) {
+      return;
+    }
+    void this.router.navigateByUrl(target, { replaceUrl });
+  }
+
+  private onboardingPathForRole(role: AuthUser['role']): string {
+    const board = this.defaultBoardForUser(role);
+    return `/onboarding/${this.boardPath(board)}`;
+  }
+
+  private onboardingRoleFromUrl(url: string): BoardKey | null {
+    const cleanPath = url.split('?')[0].split('#')[0];
+    const segments = cleanPath.replace(/^\//, '').split('/');
+    if (segments.length < 2 || segments[0] !== 'onboarding') {
+      return null;
+    }
+    if (segments[1] === 'nurse') {
+      return 'nurse';
+    }
+    if (segments[1] === 'admin') {
+      return 'admin';
+    }
+    if (segments[1] === 'ops') {
+      return 'operations';
+    }
+    return null;
+  }
+
+  private navigateToOnboarding(role: AuthUser['role'], replaceUrl = false): void {
+    const target = this.onboardingPathForRole(role);
+    const current = this.router.url.split('?')[0].split('#')[0];
+    if (current === target) {
+      return;
+    }
+    void this.router.navigateByUrl(target, { replaceUrl });
+  }
+
+  private requiresOnboarding(user: AuthUser | null | undefined): boolean {
+    if (!user) {
+      return false;
+    }
+    return !user.onboarding_completed;
   }
 
   private extractError(err: unknown, fallback: string): string {

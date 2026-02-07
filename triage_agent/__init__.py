@@ -1,5 +1,6 @@
 from .config import TriageConfig
 from .database import SQLiteRepository
+from .gemini_reasoner import GeminiTriageReasoner
 from .notification_factory import build_notifier
 from .notifications import HookNotificationDispatcher, NoopNotificationDispatcher
 from .llm_reasoner import HybridTriageReasoner, OpenAITriageReasoner
@@ -12,6 +13,7 @@ from .service import TriageService
 __all__ = [
     "HeuristicTriageReasoner",
     "OpenAITriageReasoner",
+    "GeminiTriageReasoner",
     "HybridTriageReasoner",
     "build_reasoner",
     "build_notifier",

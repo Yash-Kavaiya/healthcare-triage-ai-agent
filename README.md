@@ -6,6 +6,7 @@ Safety-first triage platform that combines a FastAPI backend, Angular UI, and a 
 
 - FastAPI backend with JWT auth, triage intake, queue workflow, dashboards, and audit endpoints.
 - Angular control center UI with intake, nurse queue, dashboard, and audit views.
+- Role-specific onboarding pages for operations, nurse, and admin workflows.
 - Shared engine for routing policy, scheduling/preemption, notifications, and SQLite persistence.
 
 ## Architecture
@@ -61,6 +62,8 @@ Default users (forced password change on first login):
 - `nurse / nurse123` (`nurse`)
 - `ops / ops123` (`operations`)
 
+After password update, users must complete role onboarding before accessing triage/queue/dashboard/audit endpoints.
+
 Role enforcement:
 
 - `queue` read/write: `nurse`, `admin`
@@ -77,10 +80,12 @@ Optional auth configuration:
 - `TRIAGE_AUTH_LOGIN_MAX_ATTEMPTS=5`
 - `TRIAGE_AUTH_LOGIN_WINDOW_SECONDS=300`
 - `TRIAGE_AUTH_LOGIN_LOCKOUT_SECONDS=900`
+- `TRIAGE_AUTH_TRUST_X_FORWARDED_FOR=false`
+- `TRIAGE_AUTH_TRUSTED_PROXY_CIDRS=10.0.0.0/8,192.168.0.0/16`
 - `TRIAGE_AUTH_FORCE_CHANGE_DEFAULTS=true`
 - `TRIAGE_AUTH_USERS_JSON=[{"username":"admin","password":"admin123","role":"admin"}]`
 
-`POST /api/v1/auth/login` applies per-username and per-source-IP lockout. When locked, the API returns `429` with `Retry-After`.
+`POST /api/v1/auth/login` applies per-username and per-source-IP lockout. By default the API ignores `X-Forwarded-For`. Set `TRIAGE_AUTH_TRUST_X_FORWARDED_FOR=true` only behind a trusted proxy. If `TRIAGE_AUTH_TRUSTED_PROXY_CIDRS` is set, forwarded headers are accepted only from those proxy ranges. When locked, the API returns `429` with `Retry-After`.
 
 ## Reasoner Modes
 
@@ -89,6 +94,8 @@ The backend uses `TRIAGE_REASONER_MODE=hybrid` by default:
 - `heuristic`
 - `openai`
 - `hybrid` (OpenAI with heuristic fallback)
+- `gemini`
+- `hybrid-gemini` (Gemini with heuristic fallback)
 
 To use OpenAI mode/hybrid:
 
@@ -101,6 +108,20 @@ Optional:
 
 - `TRIAGE_OPENAI_TIMEOUT_SECONDS=20`
 - `TRIAGE_OPENAI_MAX_OUTPUT_TOKENS=500`
+
+To use Gemini mode/hybrid-gemini:
+
+```bash
+set GEMINI_API_KEY=your_key_here
+set TRIAGE_REASONER_MODE=gemini
+set TRIAGE_GEMINI_MODEL=gemini-3-flash-preview
+```
+
+Optional:
+
+- `TRIAGE_GEMINI_TIMEOUT_SECONDS=20`
+- `TRIAGE_GEMINI_MAX_OUTPUT_TOKENS=500`
+- `TRIAGE_GEMINI_THINKING_LEVEL=HIGH`
 
 ## Notifications
 
@@ -122,6 +143,8 @@ Escalations can trigger webhook/email/SMS hooks:
 - `GET /api/v1/auth/me`
 - `POST /api/v1/auth/refresh`
 - `POST /api/v1/auth/change-password`
+- `POST /api/v1/auth/onboarding-complete`
+- `POST /api/v1/auth/onboarding-reset` (admin)
 - `POST /api/v1/auth/logout`
 - `POST /api/v1/triage/intake`
 - `GET /api/v1/queue`

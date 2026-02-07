@@ -54,6 +54,13 @@ class TriageConfig:
     openai_api_key: str = field(default_factory=lambda: os.getenv("OPENAI_API_KEY", ""))
     openai_timeout_seconds: float = 20.0
     openai_max_output_tokens: int = 500
+    gemini_model: str = field(
+        default_factory=lambda: os.getenv("TRIAGE_GEMINI_MODEL", "gemini-3-flash-preview")
+    )
+    gemini_api_key: str = field(default_factory=lambda: os.getenv("GEMINI_API_KEY", ""))
+    gemini_timeout_seconds: float = 20.0
+    gemini_max_output_tokens: int = 500
+    gemini_thinking_level: str = "HIGH"
     notifications_enabled: bool = True
     notify_on_urgencies: list[str] = field(default_factory=lambda: ["EMERGENCY", "URGENT"])
     notification_webhook_url: str = field(default_factory=lambda: os.getenv("TRIAGE_NOTIFICATION_WEBHOOK_URL", ""))
@@ -104,6 +111,20 @@ class TriageConfig:
             "TRIAGE_OPENAI_MAX_OUTPUT_TOKENS",
             cfg.openai_max_output_tokens,
         )
+        cfg.gemini_model = _env_str("TRIAGE_GEMINI_MODEL", cfg.gemini_model)
+        cfg.gemini_api_key = _env_str("GEMINI_API_KEY", cfg.gemini_api_key)
+        cfg.gemini_timeout_seconds = _env_float(
+            "TRIAGE_GEMINI_TIMEOUT_SECONDS",
+            cfg.gemini_timeout_seconds,
+        )
+        cfg.gemini_max_output_tokens = _env_int(
+            "TRIAGE_GEMINI_MAX_OUTPUT_TOKENS",
+            cfg.gemini_max_output_tokens,
+        )
+        cfg.gemini_thinking_level = _env_str(
+            "TRIAGE_GEMINI_THINKING_LEVEL",
+            cfg.gemini_thinking_level,
+        ).upper()
         cfg.notifications_enabled = _env_bool(
             "TRIAGE_NOTIFICATIONS_ENABLED",
             cfg.notifications_enabled,

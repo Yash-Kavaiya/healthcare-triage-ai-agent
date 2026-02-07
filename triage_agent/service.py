@@ -187,6 +187,15 @@ class TriageService:
     def recent_appointments(self, limit: int = 50) -> list[dict[str, Any]]:
         return self.repository.recent_appointments(limit=limit)
 
+    def dashboard_appointments(self, *, role: str, limit: int = 50) -> list[dict[str, Any]]:
+        normalized_role = role.strip().lower()
+        rows = self.repository.recent_appointments(limit=limit)
+        if normalized_role == "admin":
+            return rows
+        if normalized_role == "nurse":
+            return [self._nurse_appointment_row(row) for row in rows]
+        return [self._operations_appointment_row(row) for row in rows]
+
     def recent_activity(self, limit: int = 50) -> list[dict[str, Any]]:
         return self.repository.recent_activity(limit=limit)
 
@@ -286,6 +295,17 @@ class TriageService:
         masked = dict(row)
         masked["phone"] = self._mask_phone(masked.get("phone"))
         return masked
+
+    def _nurse_appointment_row(self, row: dict[str, Any]) -> dict[str, Any]:
+        masked = dict(row)
+        masked["phone"] = self._mask_phone(masked.get("phone"))
+        return masked
+
+    @staticmethod
+    def _operations_appointment_row(row: dict[str, Any]) -> dict[str, Any]:
+        scoped = dict(row)
+        scoped["phone"] = "-"
+        return scoped
 
     def _operations_view_row(self, row: dict[str, Any]) -> dict[str, Any]:
         return {

@@ -1,8 +1,10 @@
 import { TestBed } from '@angular/core/testing';
+import { provideRouter, Router } from '@angular/router';
 import { of } from 'rxjs';
 
 import { App } from './app.js';
 import { ApiService } from './api.service.js';
+import { routes } from './app.routes.js';
 
 class ApiServiceMock {
   login = jasmine.createSpy().and.returnValue(
@@ -12,11 +14,21 @@ class ApiServiceMock {
       token_type: 'bearer',
       expires_in: 3600,
       refresh_expires_in: 7200,
-      user: { username: 'ops', role: 'operations', password_change_required: false },
+      user: {
+        username: 'ops',
+        role: 'operations',
+        password_change_required: false,
+        onboarding_completed: false,
+      },
     }),
   );
   me = jasmine.createSpy().and.returnValue(
-    of({ username: 'ops', role: 'operations', password_change_required: false }),
+    of({
+      username: 'ops',
+      role: 'operations',
+      password_change_required: false,
+      onboarding_completed: false,
+    }),
   );
   refreshSession = jasmine.createSpy().and.returnValue(
     of({
@@ -25,7 +37,12 @@ class ApiServiceMock {
       token_type: 'bearer',
       expires_in: 3600,
       refresh_expires_in: 7200,
-      user: { username: 'ops', role: 'operations', password_change_required: false },
+      user: {
+        username: 'ops',
+        role: 'operations',
+        password_change_required: false,
+        onboarding_completed: false,
+      },
     }),
   );
   changePassword = jasmine.createSpy().and.returnValue(
@@ -35,7 +52,28 @@ class ApiServiceMock {
       token_type: 'bearer',
       expires_in: 3600,
       refresh_expires_in: 7200,
-      user: { username: 'ops', role: 'operations', password_change_required: false },
+      user: {
+        username: 'ops',
+        role: 'operations',
+        password_change_required: false,
+        onboarding_completed: false,
+      },
+    }),
+  );
+  completeOnboarding = jasmine.createSpy().and.returnValue(
+    of({
+      username: 'ops',
+      role: 'operations',
+      password_change_required: false,
+      onboarding_completed: true,
+    }),
+  );
+  resetOnboarding = jasmine.createSpy().and.returnValue(
+    of({
+      username: 'ops',
+      role: 'operations',
+      password_change_required: false,
+      onboarding_completed: false,
     }),
   );
   logout = jasmine.createSpy();
@@ -68,9 +106,10 @@ class ApiServiceMock {
 
 describe('App', () => {
   beforeEach(async () => {
+    localStorage.clear();
     await TestBed.configureTestingModule({
       imports: [App],
-      providers: [{ provide: ApiService, useClass: ApiServiceMock }],
+      providers: [provideRouter(routes), { provide: ApiService, useClass: ApiServiceMock }],
     }).compileComponents();
   });
 
@@ -85,5 +124,34 @@ describe('App', () => {
     fixture.detectChanges();
     const compiled = fixture.nativeElement as HTMLElement;
     expect(compiled.querySelector('h1')?.textContent).toContain('Patient Triage Control Center');
+  });
+
+  it('should send first login to role onboarding', () => {
+    const fixture = TestBed.createComponent(App);
+    const app = fixture.componentInstance;
+    const router = TestBed.inject(Router);
+    const navSpy = spyOn(router, 'navigateByUrl').and.resolveTo(true);
+
+    app.login();
+
+    expect(navSpy).toHaveBeenCalledWith('/onboarding/ops', { replaceUrl: true });
+    expect(app.message).toContain('Complete onboarding');
+  });
+
+  it('should complete onboarding and open board route', () => {
+    const fixture = TestBed.createComponent(App);
+    const app = fixture.componentInstance;
+    const router = TestBed.inject(Router);
+    const navSpy = spyOn(router, 'navigateByUrl').and.resolveTo(true);
+
+    app.currentUser = {
+      username: 'ops',
+      role: 'operations',
+      password_change_required: false,
+      onboarding_completed: false,
+    };
+    app.completeOnboarding('operations');
+
+    expect(navSpy).toHaveBeenCalledWith('/ops', { replaceUrl: true });
   });
 });

@@ -3,9 +3,11 @@ import { HttpClient, HttpErrorResponse, HttpHeaders, HttpParams } from '@angular
 import { Observable, catchError, switchMap, tap, throwError } from 'rxjs';
 
 import {
+  AdminResetPasswordRequest,
   AuditResponse,
   AuthChangePasswordRequest,
   AuthLoginRequest,
+  AuthResetOnboardingRequest,
   AuthTokenResponse,
   AuthUser,
   DashboardActivityResponse,
@@ -16,6 +18,9 @@ import {
   QueueBookRequest,
   QueueBookResponse,
   QueueListResponse,
+  UserCreateRequest,
+  UserListResponse,
+  UserUpdateRequest,
 } from './api.types.js';
 
 @Injectable({
@@ -58,6 +63,20 @@ export class ApiService {
       this.http
         .post<AuthTokenResponse>(`${this.baseUrl}/auth/change-password`, payload, this.authOptions())
         .pipe(tap((token) => this.setSession(token))),
+    );
+  }
+
+  completeOnboarding(): Observable<AuthUser> {
+    return this.withAutoRefresh(() =>
+      this.http
+        .post<AuthUser>(`${this.baseUrl}/auth/onboarding-complete`, {}, this.authOptions())
+        .pipe(tap((user) => this.updateStoredUser(user))),
+    );
+  }
+
+  resetOnboarding(payload: AuthResetOnboardingRequest): Observable<AuthUser> {
+    return this.withAutoRefresh(() =>
+      this.http.post<AuthUser>(`${this.baseUrl}/auth/onboarding-reset`, payload, this.authOptions()),
     );
   }
 
@@ -142,6 +161,40 @@ export class ApiService {
     );
   }
 
+  listUsers(): Observable<UserListResponse> {
+    return this.withAutoRefresh(() =>
+      this.http.get<UserListResponse>(`${this.baseUrl}/users`, this.authOptions()),
+    );
+  }
+
+  createUser(payload: UserCreateRequest): Observable<AuthUser> {
+    return this.withAutoRefresh(() =>
+      this.http.post<AuthUser>(`${this.baseUrl}/users`, payload, this.authOptions()),
+    );
+  }
+
+  updateUser(username: string, payload: UserUpdateRequest): Observable<AuthUser> {
+    return this.withAutoRefresh(() =>
+      this.http.put<AuthUser>(`${this.baseUrl}/users/${username}`, payload, this.authOptions()),
+    );
+  }
+
+  adminResetPassword(username: string, payload: AdminResetPasswordRequest): Observable<AuthUser> {
+    return this.withAutoRefresh(() =>
+      this.http.post<AuthUser>(
+        `${this.baseUrl}/users/${username}/reset-password`,
+        payload,
+        this.authOptions(),
+      ),
+    );
+  }
+
+  deleteUser(username: string): Observable<void> {
+    return this.withAutoRefresh(() =>
+      this.http.delete<void>(`${this.baseUrl}/users/${username}`, this.authOptions()),
+    );
+  }
+
   private withAutoRefresh<T>(requestFactory: () => Observable<T>): Observable<T> {
     return requestFactory().pipe(
       catchError((err) => {
@@ -174,6 +227,10 @@ export class ApiService {
     localStorage.removeItem(this.tokenKey);
     localStorage.removeItem(this.refreshTokenKey);
     localStorage.removeItem(this.userKey);
+  }
+
+  private updateStoredUser(user: AuthUser): void {
+    localStorage.setItem(this.userKey, JSON.stringify(user));
   }
 
   private getAccessToken(): string {

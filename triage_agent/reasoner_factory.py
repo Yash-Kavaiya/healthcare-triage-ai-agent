@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 
 from .config import TriageConfig
+from .gemini_reasoner import GeminiTriageReasoner
 from .llm_reasoner import HybridTriageReasoner, OpenAITriageReasoner
 from .reasoner import HeuristicTriageReasoner
 from .reasoner_protocol import TriageReasoner
@@ -25,8 +26,20 @@ def build_reasoner(config: TriageConfig) -> tuple[TriageReasoner, str]:
             api_key=config.openai_api_key or None,
         )
 
+    def _build_gemini() -> GeminiTriageReasoner:
+        return GeminiTriageReasoner(
+            model=config.gemini_model,
+            max_output_tokens=config.gemini_max_output_tokens,
+            request_timeout_seconds=config.gemini_timeout_seconds,
+            thinking_level=config.gemini_thinking_level,
+            api_key=config.gemini_api_key or None,
+        )
+
     if mode == "openai":
         return _build_openai(), f"openai:{config.openai_model}"
+
+    if mode == "gemini":
+        return _build_gemini(), f"gemini:{config.gemini_model}"
 
     if mode == "hybrid":
         try:
@@ -38,6 +51,20 @@ def build_reasoner(config: TriageConfig) -> tuple[TriageReasoner, str]:
         except Exception as exc:
             logger.warning(
                 "Failed to initialize OpenAI reasoner in hybrid mode; using heuristic only. %s",
+                exc,
+            )
+            return heuristic, "heuristic(fallback-init)"
+
+    if mode in {"hybrid-gemini", "hybrid_gemini"}:
+        try:
+            llm = _build_gemini()
+            return (
+                HybridTriageReasoner(primary=llm, fallback=heuristic),
+                f"hybrid(gemini:{config.gemini_model}->heuristic)",
+            )
+        except Exception as exc:
+            logger.warning(
+                "Failed to initialize Gemini reasoner in hybrid-gemini mode; using heuristic only. %s",
                 exc,
             )
             return heuristic, "heuristic(fallback-init)"

@@ -1,0 +1,102 @@
+<section class="panel">
+  <h2>Audit & Alerts</h2>
+  <p>Server-enforced role scope: <strong>{{ roleLabel }}</strong></p>
+  <div class="grid form-grid">
+    <label>
+      Rows
+      <input
+        type="number"
+        [ngModel]="auditRows"
+        (ngModelChange)="onAuditRowsChange($event)"
+        name="audit_rows"
+        min="10"
+        max="300"
+      />
+    </label>
+  </div>
+  <button class="primary" (click)="refresh.emit()">Load Audit Data</button>
+
+  @if (auditLoaded) {
+    <div class="audit-grid">
+      <section class="audit-card">
+        <h3>Triage Decisions</h3>
+        @if (triageRows.length) {
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Event</th>
+                  <th>Time</th>
+                  <th>Urgency</th>
+                  <th>Confidence</th>
+                  <th>Department</th>
+                  <th>Routing</th>
+                  <th>Reason</th>
+                </tr>
+              </thead>
+              <tbody>
+                @for (row of triageRows; track trackByIndex($index)) {
+                  <tr>
+                    <td>#{{ row.triageEventId }}</td>
+                    <td>{{ row.createdAt }}</td>
+                    <td>
+                      <span class="tone" [ngClass]="urgencyTone(row.urgency)">
+                        {{ row.urgency }}
+                      </span>
+                    </td>
+                    <td>{{ row.confidenceLabel }}</td>
+                    <td>{{ row.suggestedDepartment }}</td>
+                    <td>
+                      <span class="tone" [ngClass]="routingTone(row.routingAction)">
+                        {{ row.routingAction }}
+                      </span>
+                    </td>
+                    <td>{{ row.routingReason }}</td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </div>
+        } @else {
+          <p class="muted">No triage decisions found for current role scope.</p>
+        }
+      </section>
+
+      <section class="audit-card">
+        <h3>Audit Log</h3>
+        @if (auditLogRows.length) {
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>Type</th>
+                  <th>Entity</th>
+                  <th>Action</th>
+                  <th>Time</th>
+                  <th>Payload Summary</th>
+                </tr>
+              </thead>
+              <tbody>
+                @for (row of auditLogRows; track trackByIndex($index)) {
+                  <tr>
+                    <td>#{{ row.id }}</td>
+                    <td>{{ row.entityType }}</td>
+                    <td>{{ row.entityId }}</td>
+                    <td>
+                      <span class="tone neutral">{{ row.action }}</span>
+                    </td>
+                    <td>{{ row.createdAt }}</td>
+                    <td>{{ row.payloadSummary }}</td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </div>
+        } @else {
+          <p class="muted">No audit events found for current role scope.</p>
+        }
+      </section>
+    </div>
+  }
+</section>

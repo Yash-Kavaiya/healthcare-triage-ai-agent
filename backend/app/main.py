@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ipaddress
 import os
 from contextlib import asynccontextmanager
 from typing import Annotated, AsyncIterator
@@ -20,10 +21,12 @@ from triage_agent.models import Urgency
 
 from .auth import AuthManager, AuthUser, get_current_user, require_roles
 from .schemas import (
+    AdminResetPasswordRequest,
     AppointmentResultOut,
     AuditResponse,
     AuthChangePasswordRequest,
     AuthLoginRequest,
+    AuthResetOnboardingRequest,
     AuthRefreshRequest,
     AuthTokenResponse,
     AuthUserResponse,
@@ -39,6 +42,9 @@ from .schemas import (
     QueueListResponse,
     RoutingDecisionOut,
     TriageResultOut,
+    UserCreateRequest,
+    UserListResponse,
+    UserUpdateRequest,
 )
 
 
@@ -48,12 +54,61 @@ def _parse_origins(raw: str | None) -> list[str]:
     return [item.strip() for item in raw.split(",") if item.strip()]
 
 
+def _env_bool(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
+def _parse_trusted_proxy_networks(raw: str | None) -> list[ipaddress._BaseNetwork]:
+    if not raw:
+        return []
+    networks: list[ipaddress._BaseNetwork] = []
+    for item in raw.split(","):
+        value = item.strip()
+        if not value:
+            continue
+        try:
+            networks.append(ipaddress.ip_network(value, strict=False))
+        except ValueError:
+            continue
+    return networks
+
+
+def _request_from_trusted_proxy(request: Request, trusted_networks: list[ipaddress._BaseNetwork]) -> bool:
+    if not trusted_networks:
+        return True
+    host = request.client.host if request.client else ""
+    if not host:
+        return False
+    try:
+        source_ip = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return any(source_ip in network for network in trusted_networks)
+
+
+def _forwarded_ip_candidate(raw: str) -> str | None:
+    value = raw.strip()
+    if not value:
+        return None
+    try:
+        parsed = ipaddress.ip_address(value)
+        return str(parsed)
+    except ValueError:
+        return None
+
+
 def _request_source_ip(request: Request) -> str:
-    forwarded = request.headers.get("x-forwarded-for")
-    if forwarded:
-        first_ip = forwarded.split(",")[0].strip()
-        if first_ip:
-            return first_ip
+    trust_forwarded = _env_bool("TRIAGE_AUTH_TRUST_X_FORWARDED_FOR", False)
+    trusted_networks = _parse_trusted_proxy_networks(os.getenv("TRIAGE_AUTH_TRUSTED_PROXY_CIDRS"))
+    if trust_forwarded and _request_from_trusted_proxy(request, trusted_networks):
+        forwarded = request.headers.get("x-forwarded-for", "")
+        for part in forwarded.split(","):
+            candidate = _forwarded_ip_candidate(part)
+            if candidate:
+                return candidate
     if request.client and request.client.host:
         return request.client.host
     return "unknown"
@@ -123,6 +178,7 @@ def _auth_user_out(value: AuthUser) -> AuthUserResponse:
         role=value.role,  # type: ignore[arg-type]
         full_name=value.full_name,
         password_change_required=value.password_change_required,
+        onboarding_completed=value.onboarding_completed,
     )
 
 
@@ -157,6 +213,7 @@ ServiceDep = Annotated[TriageService, Depends(get_service)]
 AuthManagerDep = Annotated[AuthManager, Depends(get_auth_manager)]
 StaffDep = Annotated[AuthUser, Depends(require_roles("operations", "nurse", "admin"))]
 NurseDep = Annotated[AuthUser, Depends(require_roles("nurse", "admin"))]
+AdminDep = Annotated[AuthUser, Depends(require_roles("admin"))]
 CurrentUserDep = Annotated[AuthUser, Depends(get_current_user)]
 
 router = APIRouter()
@@ -249,6 +306,89 @@ def logout(payload: AuthRefreshRequest, auth_manager: AuthManagerDep) -> dict[st
     return {"status": "ok"}
 
 
+@router.post("/api/v1/auth/onboarding-complete", response_model=AuthUserResponse, tags=["auth"])
+def complete_onboarding(
+    current_user: CurrentUserDep,
+    auth_manager: AuthManagerDep,
+) -> AuthUserResponse:
+    if current_user.password_change_required:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Password change is required before onboarding completion.",
+        )
+    updated_user = auth_manager.complete_onboarding(username=current_user.username)
+    return _auth_user_out(updated_user)
+
+
+@router.post("/api/v1/auth/onboarding-reset", response_model=AuthUserResponse, tags=["auth"])
+def reset_onboarding(
+    payload: AuthResetOnboardingRequest,
+    _: AdminDep,
+    auth_manager: AuthManagerDep,
+) -> AuthUserResponse:
+    updated_user = auth_manager.reset_onboarding(username=payload.username)
+    return _auth_user_out(updated_user)
+
+
+@router.get("/api/v1/users", response_model=UserListResponse, tags=["users"])
+def list_users(_: AdminDep, auth_manager: AuthManagerDep) -> UserListResponse:
+    users = auth_manager.list_users()
+    return UserListResponse(users=[_auth_user_out(user) for user in users])
+
+
+@router.post("/api/v1/users", response_model=AuthUserResponse, tags=["users"], status_code=status.HTTP_201_CREATED)
+def create_user(
+    payload: UserCreateRequest,
+    _: AdminDep,
+    auth_manager: AuthManagerDep,
+) -> AuthUserResponse:
+    user = auth_manager.create_user(
+        username=payload.username,
+        password=payload.password,
+        role=payload.role,
+        full_name=payload.full_name,
+    )
+    return _auth_user_out(user)
+
+
+@router.put("/api/v1/users/{username}", response_model=AuthUserResponse, tags=["users"])
+def update_user(
+    username: str,
+    payload: UserUpdateRequest,
+    _: AdminDep,
+    auth_manager: AuthManagerDep,
+) -> AuthUserResponse:
+    user = auth_manager.update_user(
+        username=username,
+        role=payload.role,
+        full_name=payload.full_name,
+    )
+    return _auth_user_out(user)
+
+
+@router.post("/api/v1/users/{username}/reset-password", response_model=AuthUserResponse, tags=["users"])
+def admin_reset_password(
+    username: str,
+    payload: AdminResetPasswordRequest,
+    _: AdminDep,
+    auth_manager: AuthManagerDep,
+) -> AuthUserResponse:
+    user = auth_manager.admin_reset_password(
+        username=payload.username,
+        new_password=payload.new_password,
+    )
+    return _auth_user_out(user)
+
+
+@router.delete("/api/v1/users/{username}", tags=["users"], status_code=status.HTTP_204_NO_CONTENT)
+def delete_user(
+    username: str,
+    _: AdminDep,
+    auth_manager: AuthManagerDep,
+) -> None:
+    auth_manager.delete_user(username=username)
+
+
 @router.post("/api/v1/triage/intake", response_model=IntakeResponse, tags=["triage"])
 def intake(payload: IntakeRequest, service: ServiceDep, _: StaffDep) -> IntakeResponse:
     outcome = service.process_intake(
@@ -311,10 +451,12 @@ def dashboard_metrics(service: ServiceDep, _: StaffDep) -> DashboardMetricsRespo
 )
 def dashboard_appointments(
     service: ServiceDep,
-    _: StaffDep,
+    current_user: StaffDep,
     limit: int = Query(default=30, ge=1, le=500),
 ) -> DashboardAppointmentsResponse:
-    return DashboardAppointmentsResponse(items=service.recent_appointments(limit=limit))
+    return DashboardAppointmentsResponse(
+        items=service.dashboard_appointments(role=current_user.role, limit=limit)
+    )
 
 
 @router.get(

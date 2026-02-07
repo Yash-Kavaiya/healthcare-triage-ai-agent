@@ -1,0 +1,118 @@
+<section class="panel">
+  <h2>Patient Intake</h2>
+  <div class="grid form-grid">
+    <label>
+      Phone
+      <input type="text" [(ngModel)]="form.phone" name="phone" placeholder="Optional" />
+    </label>
+    <label>
+      Age
+      <input type="number" [(ngModel)]="form.age" name="age" min="0" max="120" />
+    </label>
+    <label>
+      Sex
+      <select [(ngModel)]="form.sex" name="sex">
+        <option>Male</option>
+        <option>Female</option>
+        <option>Other</option>
+      </select>
+    </label>
+    <label class="span-3">
+      Symptoms
+      <textarea [(ngModel)]="form.symptoms" name="symptoms" rows="4" placeholder="Chest pain since morning, breathing feels heavy..."></textarea>
+    </label>
+    <label class="toggle">
+      <input type="checkbox" [(ngModel)]="form.auto_book_high_urgency" name="auto_book_high_urgency" />
+      Enable auto-book for EMERGENCY/URGENT
+    </label>
+    <label class="toggle span-2">
+      <input type="checkbox" [(ngModel)]="form.always_route_when_model_requests_human" name="always_route_when_model_requests_human" />
+      Always route to queue when model requests human review
+    </label>
+  </div>
+  <button class="primary" (click)="run.emit()" [disabled]="loading">
+    {{ loading ? 'Running triage...' : 'Run Triage' }}
+  </button>
+
+  @if (result) {
+    <div class="result-card">
+      <div class="result-head">
+        <h3>Triage Result</h3>
+        <div class="tag-row">
+          <span class="tone" [ngClass]="urgencyTone(result.triage_result.urgency)">
+            {{ result.triage_result.urgency }}
+          </span>
+          <span class="tone neutral">
+            {{ formatPercent(result.triage_result.confidence) }} confidence
+          </span>
+          <span class="tone" [ngClass]="routingTone(result.routing_decision.action)">
+            {{ result.routing_decision.action }}
+          </span>
+        </div>
+      </div>
+
+      <div class="result-grid">
+        <article>
+          <h4>Department</h4>
+          <p>{{ result.triage_result.suggested_department }}</p>
+        </article>
+        <article>
+          <h4>Recommended Window</h4>
+          <p>{{ result.triage_result.recommended_timeframe_minutes }} min</p>
+        </article>
+        <article>
+          <h4>Queue Reference</h4>
+          <p>{{ result.queue_id ?? '-' }}</p>
+        </article>
+        <article>
+          <h4>Appointment</h4>
+          <p>
+            @if (result.appointment_result) {
+              {{ result.appointment_result.status }}
+            } @else {
+              Pending
+            }
+          </p>
+        </article>
+      </div>
+
+      <div class="result-section">
+        <h4>Routing reason</h4>
+        <p>{{ result.routing_decision.reason }}</p>
+      </div>
+
+      <div class="result-section">
+        <h4>Clinical rationale</h4>
+        <p>{{ result.triage_result.rationale }}</p>
+      </div>
+
+      @if (result.triage_result.red_flags.length) {
+        <div class="result-section">
+          <h4>Red Flags</h4>
+          <div class="tag-row">
+            @for (flag of result.triage_result.red_flags; track trackByIndex($index)) {
+              <span class="tone critical">{{ flag }}</span>
+            }
+          </div>
+        </div>
+      }
+
+      <div class="result-section">
+        <h4>Department Fit</h4>
+        <div class="candidate-list">
+          @for (candidate of result.triage_result.department_candidates; track candidate.department) {
+            <div class="candidate-item">
+              <div class="candidate-line">
+                <span>{{ candidate.department }}</span>
+                <strong>{{ formatPercent(candidate.score) }}</strong>
+              </div>
+              <div class="candidate-meter">
+                <span [style.width.%]="candidate.score <= 1 ? candidate.score * 100 : candidate.score"></span>
+              </div>
+            </div>
+          }
+        </div>
+      </div>
+    </div>
+  }
+</section>

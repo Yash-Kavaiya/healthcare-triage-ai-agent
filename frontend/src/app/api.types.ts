@@ -13,6 +13,7 @@ export interface AuthUser {
   role: 'operations' | 'nurse' | 'admin';
   full_name?: string | null;
   password_change_required: boolean;
+  onboarding_completed: boolean;
 }
 
 export interface AuthTokenResponse {
@@ -27,6 +28,10 @@ export interface AuthTokenResponse {
 export interface AuthChangePasswordRequest {
   current_password: string;
   new_password: string;
+}
+
+export interface AuthResetOnboardingRequest {
+  username: string;
 }
 
 export interface TriageResult {
@@ -137,4 +142,25 @@ export interface AuditResponse {
   role: 'operations' | 'nurse' | 'admin';
   triage: Array<Record<string, unknown>>;
   audit_log: Array<Record<string, unknown>>;
+}
+
+export interface UserListResponse {
+  users: AuthUser[];
+}
+
+export interface UserCreateRequest {
+  username: string;
+  password: string;
+  role: 'operations' | 'nurse' | 'admin';
+  full_name?: string | null;
+}
+
+export interface UserUpdateRequest {
+  full_name?: string | null;
+  role?: 'operations' | 'nurse' | 'admin' | null;
+}
+
+export interface AdminResetPasswordRequest {
+  username: string;
+  new_password: string;
 }
